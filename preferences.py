@@ -37,21 +37,54 @@ def correct_name(self, context):
         self.name += '(1)'
 
 
-class ExtensionOperatorProperty(PropertyGroup):
+def get_color_tag_enum_items():
+    if bpy.app.version < (2, 93, 0):
+        items = [
+            (f'COLOR_0{i}',
+             '',
+             '',
+             f'COLORSET_0{i}_VEC' if i != 0 else 'COLORSET_13_VEC', i) for i in range(0, 9)
+        ]
+    else:
+        items = [
+            (f'COLOR_0{i}',
+             '',
+             '',
+             f'COLLECTION_COLOR_0{i}' if i != 0 else 'OUTLINER_COLLECTION', i) for i in range(0, 9)
+        ]
+
+    return items
+
+
+def get_color_tag_icon(index):
+    if bpy.app.version < (2, 93, 0):
+        return 'COLORSET_13_VEC' if index == 0 else f'COLORSET_0{index}_VEC'
+    else:
+        return f'COLLECTION_COLOR_0{index}' if index != 0 else 'OUTLINER_COLLECTION'
+
+
+enum_color_tag_items = get_color_tag_enum_items()
+
+
+class ConfigItemProperty(PropertyGroup):
     # USE
     use_config: BoolProperty(name='Use', default=True)
     # UI
     color_tag: EnumProperty(name='Color Tag',
-                            items=[
-                                (f'COLOR_0{i}', '', '', f'COLLECTION_COLOR_0{i}' if i != 0 else 'OUTLINER_COLLECTION',
-                                 i) for i in range(0, 9)])
+                            items=enum_color_tag_items)
+    # IO type
+    io_type: EnumProperty(name='IO Type',
+                          items=[('IMPORT', 'Import', '', 'IMPORT', 0), ('EXPORT', 'Export', '', 'EXPORT', 1)],
+                          default='IMPORT')
     # information
     name: StringProperty(name='Preset Name', update=correct_name)
     description: StringProperty(name='Description',
                                 description='Show in the popup operator tips')
     # extension
     extension: StringProperty(name='Extension')
-    # custom match rule
+
+    # custom import match rule
+    ###############################
     match_rule: EnumProperty(name='Match Rule',
                              items=[('NONE', 'None (Default)', ''),
                                     ('STARTSWITH', 'Startswith', ''),
@@ -62,24 +95,43 @@ class ExtensionOperatorProperty(PropertyGroup):
 
     match_value: StringProperty(name='Match Value', default='')
 
+    # custom export temp path
+    temporary_directory: StringProperty(name='Temporary Directory', subtype='DIR_PATH',
+                                        description="Temporary Directory to store export files.\nIf empty, use blender's default temporary directory")
+
     # remove grease pencil from default because this design is only allow one default importer
     operator_type: EnumProperty(
         name='Operator Type',
         items=[
-            ("", "Default", "Default blender build-in importer", "CUBE", 0),
+            ("", "Import", "Default blender build-in importer", "CUBE", 0),
             None,
-            ('DEFAULT_DAE', 'Collada (.dae)', '', 'CUBE', 99),
-            ('DEFAULT_ABC', 'Alembic (.abc)', '', 'CUBE', 98),
-            ('DEFAULT_USD', 'USD (.usd/.usda/.usdc)', '', 'CUBE', 97),
+            ('DEFAULT_DAE', 'Collada (.dae)', '', 'IMPORT', 99),
+            ('DEFAULT_ABC', 'Alembic (.abc)', '', 'IMPORT', 98),
+            ('DEFAULT_USD', 'USD (.usd/.usda/.usdc)', '', 'IMPORT', 97),
             ('DEFAULT_SVG', 'SVG (.svg)', '', 'GP_SELECT_POINTS', 96),
-            ('DEFAULT_PLY', 'Stanford (.ply)', '', 'CUBE', 95),
-            ('DEFAULT_STL', 'Stl (.stl)', '', 'CUBE', 94),
-            ('DEFAULT_FBX', 'FBX (.fbx)', '', 'CUBE', 93),
-            ('DEFAULT_GLTF', 'glTF 2.0 (.gltf/.glb)', '', 'CUBE', 92),
-            ('DEFAULT_OBJ', 'Wavefront (.obj)', '', 'CUBE', 91),
-            ('DEFAULT_X3D', 'X3D (.x3d/.wrl)', '', 'CUBE', 90),
+            ('DEFAULT_PLY', 'Stanford (.ply)', '', 'IMPORT', 95),
+            ('DEFAULT_STL', 'Stl (.stl)', '', 'IMPORT', 94),
+            ('DEFAULT_FBX', 'FBX (.fbx)', '', 'IMPORT', 93),
+            ('DEFAULT_GLTF', 'glTF 2.0 (.gltf/.glb)', '', 'IMPORT', 92),
+            ('DEFAULT_OBJ', 'Wavefront (.obj)', '', 'IMPORT', 91),
+            ('DEFAULT_X3D', 'X3D (.x3d/.wrl)', '', 'IMPORT', 90),
 
-            ("", "Blend File", "Blend File", "BLENDER", 0),
+            ("", "Export", "Default blender build-in exporter", "CUBE", 0),
+
+            ('EXPORT_DAE', 'Collada (.dae)', '', 'EXPORT', 199),
+            ('EXPORT_ABC', 'Alembic (.abc)', '', 'EXPORT', 198),
+            ('EXPORT_USD', 'USD (.usd)', '', 'EXPORT', 197),
+            ('EXPORT_USDC', 'USD (.usdc)', '', 'EXPORT', 196),
+            ('EXPORT_USDA', 'USD (.usda)', '', 'EXPORT', 195),
+            ('EXPORT_PLY', 'Stanford (.ply)', '', 'EXPORT', 194),
+            ('EXPORT_STL', 'Stl (.stl)', '', 'EXPORT', 193),
+            ('EXPORT_FBX', 'FBX (.fbx)', '', 'EXPORT', 192),
+            ('EXPORT_GLTF', 'glTF 2.0 (.gltf)', '', 'EXPORT', 191),
+            ('EXPORT_OBJ', 'Wavefront (.obj)', '', 'EXPORT', 190),
+            None,
+            ('EXPORT_BLEND', 'Blend (.blend)', '', 'BLENDER', 200),
+
+            ("", "Import Blend", "Import Blend File", "BLENDER", 0),
             None,
             ('APPEND_BLEND_MATERIAL', 'Append Materials', 'Append All', 'MATERIAL', 1),
             ('APPEND_BLEND_COLLECTION', 'Append Collections', 'Append All',
@@ -104,6 +156,9 @@ class ExtensionOperatorProperty(PropertyGroup):
              'Import material from a single file and assign it to active object', 'MATERIAL', 101),
             ('ADDONS_BLEND_WORLD', 'Append and assign world',
              'Import world from a single file and set it as context world', 'WORLD', 102),
+            None,
+            ('ADDONS_INSTALL_ADDON', 'Install Addon (.py/.zip)',
+             'Import and Install addon', 'COMMUNITY', 103),
             None,
             ('CUSTOM', 'Custom', '', 'USER', 666),
         ],
@@ -152,10 +207,10 @@ class SPIO_OT_OperatorPropRemove(OperatorPropAction, bpy.types.Operator):
     action = 'REMOVE'
 
 
-from .ops.utils import convert_value
+from .ops.core import convert_value
 
 
-class SPIO_OT_ExtensionListAction:
+class SPIO_OT_ConfigListAction:
     """Add / Remove / Copy current config"""
     bl_label = "Config Operate"
     bl_options = {'REGISTER', 'UNDO'}
@@ -211,35 +266,35 @@ class SPIO_OT_ExtensionListAction:
         pref.config_list_index = max(0, min(new_index, len(pref.config_list) - 1))
 
 
-class SPIO_OT_ExtensionListAdd(SPIO_OT_ExtensionListAction, bpy.types.Operator):
+class SPIO_OT_ConfigListAdd(SPIO_OT_ConfigListAction, bpy.types.Operator):
     bl_idname = "spio.config_list_add"
     bl_label = "Add Config"
 
     action = 'ADD'
 
 
-class SPIO_OT_ExtensionListRemove(SPIO_OT_ExtensionListAction, bpy.types.Operator):
+class SPIO_OT_ConfigListRemove(SPIO_OT_ConfigListAction, bpy.types.Operator):
     bl_idname = "spio.config_list_remove"
     bl_label = "Remove Config"
 
     action = 'REMOVE'
 
 
-class SPIO_OT_ExtensionListCopy(SPIO_OT_ExtensionListAction, bpy.types.Operator):
+class SPIO_OT_ConfigListCopy(SPIO_OT_ConfigListAction, bpy.types.Operator):
     bl_idname = "spio.config_list_copy"
     bl_label = "Copy Config"
 
     action = 'COPY'
 
 
-class SPIO_OT_ExtensionListMoveUP(SPIO_OT_ExtensionListAction, bpy.types.Operator):
+class SPIO_OT_ConfigListMoveUP(SPIO_OT_ConfigListAction, bpy.types.Operator):
     bl_idname = "spio.config_list_move_up"
     bl_label = 'Move Up'
 
     action = 'UP'
 
 
-class SPIO_OT_ExtensionListMoveDown(SPIO_OT_ExtensionListAction, bpy.types.Operator):
+class SPIO_OT_ConfigListMoveDown(SPIO_OT_ConfigListAction, bpy.types.Operator):
     bl_idname = "spio.config_list_move_down"
     bl_label = 'Move Down'
 
@@ -266,13 +321,14 @@ class ConfigListFilterProperty(PropertyGroup):
                                     default='NONE', description='Matching rule of the name')
 
     filter_color_tag: EnumProperty(name='Color Tag',
-                                   items=[(f'COLOR_0{i}', '', '',
-                                           f'COLLECTION_COLOR_0{i}' if i != 0 else 'OUTLINER_COLLECTION', i) for i in
-                                          range(0, 9)])
+                                   items=enum_color_tag_items)
 
     reverse: BoolProperty(name="Reverse", default=False,
                           options=set(),
                           description="Reverse", )
+
+    show_import: BoolProperty(name='Show Import', default=True)
+    show_export: BoolProperty(name='Show Export', default=True)
 
 
 class SPIO_OT_color_tag_selector(bpy.types.Operator):
@@ -327,9 +383,10 @@ class SPIO_OT_color_tag_selector(bpy.types.Operator):
             row.scale_x = 1.12
             for i in range(0, 9):
                 row.operator(f'wm.spio_color_tag_{i}', text='',
-                             icon=f'COLLECTION_COLOR_0{i}' if i != 0 else 'X')
+                             icon=get_color_tag_icon(i))
 
-        context.window_manager.popup_menu(draw, title="Color", icon='OUTLINER_COLLECTION')
+        context.window_manager.popup_menu(draw, title="Color", icon='OUTLINER_COLLECTION' if bpy.app.version > (
+            2, 93, 0) else 'COLORSET_13_VEC')
 
         return {'FINISHED'}
 
@@ -340,9 +397,9 @@ class PREF_UL_ConfigList(bpy.types.UIList):
         row = layout.row()
 
         row.operator('spio.color_tag_selector', text='',
-                     icon=f'COLLECTION_{item.color_tag}' if item.color_tag != 'COLOR_00' else 'OUTLINER_COLLECTION').index = index
+                     icon=get_color_tag_icon(int(item.color_tag[-1:]))).index = index
         row.prop(item, 'name', text='', emboss=False)
-        row.prop(item, 'extension', text='', emboss=False)
+        row.prop(item, 'extension', text='', emboss=False, icon=item.io_type)
         row.prop(item, 'use_config', text='')
 
     def draw_filter(self, context, layout):
@@ -354,70 +411,97 @@ class PREF_UL_ConfigList(bpy.types.UIList):
         items = getattr(data, propname)
         ordered = []
 
-        filtered = bpy.types.UI_UL_list.filter_items_by_name(getattr(filter, 'filter_' + filter.filter_type),
-                                                             self.bitflag_filter_item,
-                                                             items,
-                                                             filter.filter_type.removeprefix('filter_'),
-                                                             reverse=filter.reverse)
+        filtered = [self.bitflag_filter_item] * len(items)
 
+        for i, item in enumerate(items):
+            if item.io_type == 'IMPORT' and not filter.show_import:
+                filtered[i] &= ~self.bitflag_filter_item
+
+        for i, item in enumerate(items):
+            if item.io_type == 'EXPORT' and not filter.show_export:
+                filtered[i] &= ~self.bitflag_filter_item
+
+        ################################################
+        if filter.filter_type == 'extension':
+            for i, item in enumerate(items):
+                if item.extension != filter.filter_extension and filter.filter_extension != '':
+                    filtered[i] &= ~self.bitflag_filter_item
+
+        elif filter.filter_type == 'match_rule':
+            for i, item in enumerate(items):
+                if item.match_rule != filter.filter_match_rule and filter.filter_match_rule != '':
+                    filtered[i] &= ~self.bitflag_filter_item
+
+        elif filter.filter_type == 'color_tag':
+            for i, item in enumerate(items):
+                if item.color_tag != filter.filter_color_tag and filter.filter_color_tag != '':
+                    filtered[i] &= ~self.bitflag_filter_item
+
+        elif filter.filter_type == 'name':
+            for i, item in enumerate(items):
+                if item.name != filter.filter_color_tag and filter.filter_name != '':
+                    filtered[i] &= ~self.bitflag_filter_item
+
+        # invert
+        if filtered and filter.reverse:
+            show_flag = self.bitflag_filter_item & ~self.bitflag_filter_item
+            for i, bitflag in enumerate(filtered):
+                if bitflag == show_flag:
+                    filtered[i] = self.bitflag_filter_item
+                else:
+                    filtered[i] &= ~self.bitflag_filter_item
         try:
-            ordered = bpy.types.UI_UL_list.sort_items_helper(items, filter.filter_type.removeprefix('filter_'))
+            ordered = bpy.types.UI_UL_list.sort_items_helper(items,
+                                                             lambda i: len(getattr(i, filter.filter_type[7:]), True))
         except:
             pass
 
         return filtered, ordered
 
-        # OLD STYLE
-        #################################################
-        # filtered = [self.bitflag_filter_item] * len(items)
-        # if filter.filter_type == 'extension':
-        #     for i, item in enumerate(items):
-        #         if item.extension != filter.filter_extension and filter.filter_extension != '':
-        #             filtered[i] &= ~self.bitflag_filter_item
-
-        # # invert
-        # if filtered and filter.reverse:
-        #     show_flag = self.bitflag_filter_item & ~self.bitflag_filter_item
-        #     for i, bitflag in enumerate(filtered):
-        #         if bitflag == show_flag:
-        #             filtered[i] = self.bitflag_filter_item
-        #         else:
-        #             filtered[i] &= ~self.bitflag_filter_item
-        # ordered = bpy.types.UI_UL_list.sort_items_helper(items, lambda i: len(i.extension), True)
-        #################################################
-
 
 class SPIO_MT_ConfigIOMenu(bpy.types.Menu):
     bl_label = "Config Import/Export"
-    bl_idname = "SPIO_PT_ConfigIOMenu"
+    bl_idname = "SPIO_MT_ConfigIOMenu"
 
     def draw(self, context):
         layout = self.layout
         layout.operator('spio.import_config', icon='IMPORT')
         layout.operator('spio.export_config', icon='EXPORT')
+        layout.operator('wm.save_userpref',icon = 'PREFERENCES')
 
 
 class SPIO_Preference(bpy.types.AddonPreferences):
     bl_idname = __package__
 
-    # UI
+    # Tab
     ui: EnumProperty(name='UI', items=[
         ('SETTINGS', 'Settings', '', 'PREFERENCES', 0),
         ('CONFIG', 'Config', '', 'PRESET', 1),
         ('URL', 'Help', '', 'URL', 2),
-    ],default = 'CONFIG')
+    ], default='CONFIG')
     use_N_panel: BoolProperty(name='Use N Panel', default=True)
 
     # Settings
     force_unicode: BoolProperty(name='Force Unicode',
                                 description='Force to use "utf-8" to decode filepath \nOnly enable when your system coding "utf-8"',
                                 default=False)
+
+    experimental: BoolProperty(name='Experimental', default=False)
+
+    # Post option
+    post_open_dir: BoolProperty(name='Open Dir After Export',
+                                description='Open the target directory after export', default=False)
+    post_push_to_clipboard: BoolProperty(name='Copy After Export',
+                                         description='Copy files to clipboard after export models / images',
+                                         default=True)
+
+    # UI
     report_time: BoolProperty(name='Report Time',
                               description='Report import time', default=True)
 
     disable_warning_rules: BoolProperty(name='Close Warning Rules', default=False)
     # Preset
-    config_list: CollectionProperty(type=ExtensionOperatorProperty)
+    config_list: CollectionProperty(type=ConfigItemProperty)
     config_list_index: IntProperty(min=0, default=0)
 
     def draw(self, context):
@@ -444,6 +528,7 @@ class SPIO_Preference(bpy.types.AddonPreferences):
         box.label(text='Help', icon='HELP')
         row = box.row()
         row.operator('wm.url_open', text='Manual').url = 'http://atticus-lv.gitee.io/super_io/#/'
+        row.operator('spio.check_update', text='Check Update')
 
         box = layout.box()
         box.label(text='Sponsor: 只剩一瓶辣椒酱', icon='FUND')
@@ -462,25 +547,42 @@ class SPIO_Preference(bpy.types.AddonPreferences):
         col = layout.column(align=True).box()
         col.use_property_split = True
 
-        row = col.row(align=True)
+        box = col.box()
+        box.label(text='Import', icon="IMPORT")
+        row = box.row(align=True)
         row.alert = True
         row.prop(self, 'force_unicode', text='')
         row.label(text='Force Unicode')
 
-        row = col.row(align=True)
+        box = col.box()
+        box.label(text='Export', icon="EXPORT")
+        row = box.row(align=True)
+        row.prop(context.preferences.filepaths, 'temporary_directory', text="Temporary Files")
+
+        row = box.row(align=True)
+        row.prop(self, 'post_open_dir')
+
+        row = box.row(align=True)
+        row.prop(self, 'post_push_to_clipboard')
+
+        row = box.row(align=True)
+        row.prop(self, 'experimental')
+
+        box = col.box()
+        box.label(text='User Interface', icon='WINDOW')
+
+        row = box.row(align=True)
         row.prop(self, 'use_N_panel', text='')
         row.label(text='Use N Panel')
 
-        row = col.row(align=True)
+        row = box.row(align=True)
         row.prop(self, 'report_time', text='')
         row.label(text='Report Time')
 
-        row = col.row(align=True)
+        row = box.row(align=True)
         row.prop(self, 'disable_warning_rules', text='')
         row.label(text='Close Warning Rules')
 
-        col = layout.column(align=True).box()
-        col.use_property_split = True
         self.draw_keymap(context, col)
 
     def draw_keymap(self, context, layout):
@@ -573,29 +675,52 @@ class SPIO_Preference(bpy.types.AddonPreferences):
 
         box.use_property_split = True
         box1 = box.box()
+
+        row = box1.row(align=True)
+        row.prop(item, 'io_type', expand=True)
+
         box1.prop(item, 'name')
-        box1.prop(item, 'extension')
         box1.prop(item, 'description')
 
-        box2 = box.box()
-        box2.prop(item, 'match_rule')
-        if item.match_rule != 'NONE':
-            box2.prop(item, 'match_value', text='Match Value' if item.match_rule != 'REGEX' else 'Expression')
-            if not self.disable_warning_rules:
-                box3 = box2.box().column(align=True)
-                box3.alert = True
-                sub_row = box3.row()
-                sub_row.label(text="Warning", icon='ERROR')
-                sub_row.prop(self, 'disable_warning_rules', toggle=True)
-                box4 = box3
-                # box4.alert = False
-                box4.label(text="1. If file name not matching this rule")
-                box4.label(text="   It will search for the next config which match")
-                box4.label(text="2. If no config’s rule is matched")
-                box4.label(
-                    text="   It will popup all available importer in a menu after import all file that match a rule")
+        f = box1
+        f.alert = (item.extension == '')
+        f.prop(item, 'extension')
+
+        if item.io_type == 'IMPORT':
+            box2 = box.box()
+            box2.prop(item, 'match_rule')
+            if item.match_rule != 'NONE':
+                box2.prop(item, 'match_value', text='Match Value' if item.match_rule != 'REGEX' else 'Expression')
+                if not self.disable_warning_rules:
+                    box3 = box2.box().column(align=True)
+                    box3.alert = True
+                    sub_row = box3.row()
+                    sub_row.label(text="Warning", icon='ERROR')
+                    sub_row.prop(self, 'disable_warning_rules', toggle=True)
+                    box4 = box3
+                    # box4.alert = False
+                    box4.label(text="1. If file name not matching this rule")
+                    box4.label(text="   It will search for the next config which match")
+                    box4.label(text="2. If no config’s rule is matched")
+                    box4.label(
+                        text="   It will popup all available importer in a menu after import all file that match a rule")
+
+        elif item.io_type == 'EXPORT':
+            box2 = box.box()
+            box2.prop(item, 'temporary_directory')
 
         box3 = box.box()
+        # warning
+        if item.operator_type.startswith('EXPORT') and item.io_type not in {'EXPORT'}:
+            box3.alert = True
+            box3.label(text='Wrong IO Type / Operator Type', icon='ERROR')
+
+        elif (not (item.operator_type.startswith('EXPORT') or item.operator_type.startswith('CUSTOM')) and
+              item.io_type == 'EXPORT'):
+            box3.alert = True
+            box3.label(text='Wrong IO Type / Operator Type', icon='ERROR')
+        else:
+            box3.alert = False
         box3.prop(item, 'operator_type')
 
         if item.operator_type == 'CUSTOM':
@@ -637,9 +762,9 @@ classes = [
     OperatorProperty,
     SPIO_OT_OperatorPropAdd, SPIO_OT_OperatorPropRemove,
 
-    ExtensionOperatorProperty,
-    SPIO_OT_ExtensionListAdd, SPIO_OT_ExtensionListRemove, SPIO_OT_ExtensionListCopy, SPIO_OT_ExtensionListMoveUP,
-    SPIO_OT_ExtensionListMoveDown,
+    ConfigItemProperty,
+    SPIO_OT_ConfigListAdd, SPIO_OT_ConfigListRemove, SPIO_OT_ConfigListCopy, SPIO_OT_ConfigListMoveUP,
+    SPIO_OT_ConfigListMoveDown,
 
     SPIO_OT_color_tag_selector,
 
@@ -662,6 +787,14 @@ def add_keybind():
         kmi = km.keymap_items.new("wm.super_import", 'V', 'PRESS', ctrl=True, shift=True)
         addon_keymaps.append((km, kmi))
 
+        km = wm.keyconfigs.addon.keymaps.new(name='Image Generic', space_type='IMAGE_EDITOR')
+        kmi = km.keymap_items.new("wm.super_export", 'C', 'PRESS', ctrl=True, shift=True)
+        addon_keymaps.append((km, kmi))
+
+        km = wm.keyconfigs.addon.keymaps.new(name='3D View', space_type='VIEW_3D')
+        kmi = km.keymap_items.new("wm.super_export", 'C', 'PRESS', ctrl=True, shift=True)
+        addon_keymaps.append((km, kmi))
+
 
 def remove_keybind():
     wm = bpy.context.window_manager
@@ -681,7 +814,7 @@ def register():
 
     try:
         for key in get_pref().config_list.__annotations__.keys():
-            the_value = getattr(ExtensionOperatorProperty, key)
+            the_value = getattr(ConfigItemProperty, key)
     except Exception as e:
         print(e)
 

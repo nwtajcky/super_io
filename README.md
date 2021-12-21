@@ -1,6 +1,20 @@
-# Super Import (SPIO)
+<p align="center">
+  <a href="https://atticus-lv.gitee.io/super_io/#/">
+    <img src="res/img/logo_bg.png" alt="logo" width="540px"/>
+  </a>
+</p>
+<h4 align="center">
+    Allow you to copy and paste to import models and images. <br>
+</h4>
+<p align="center">
+    Documentation ➡️
+    <a href="https://atticus-lv.gitee.io/super_io/#/">
+	[Gitee] 
+    </a>
+    Blender 2.83 ~ 3.0
+</p>
 
-> Only support windows now (I don't have mac or linux computer)
+# Intro
 
 SPIO is a blender addon that allow you to copy and paste to import models and images. 
 
@@ -8,78 +22,74 @@ Currently we can not drag and drop to import model in blender, but with this add
 
 Import model / image never so easily in blender before.
 
-## Feature
+# Contributing
+SPIO needs help from you! 
 
-> SPIO have a config system for advance user. Normally, you don't need to add even one config to import model like .obj/.fbx./.dae/.usd which blender supported by default
->
-> But if you want to use your own addon(Like Better FBX), or your own operator, SPIO's config system make sense.
+Translation, different platform support, and new features which come from great idea.
 
-### 1.Custom rules
+# Log
 
-SPIO comes with lots of build-in operator, they all support batch import mode. 
+### v1.2.8
 
-If you have you own style of naming to manage your file(mostly is .blend I think), SPIO will give you a surprise. 
+错误修复
++ 修复io类型弹出过滤器
++ 修复mac测试导致的导出错误
 
-You are allow to directly import your custom naming file (import all material/collection/world/nodes)
+本地化
++ 将翻译文件更改为json文件
 
-Accidently, If you don't make a correct config for the missing file, SPIO will still popup other config with same extension setting, also with the default importer menu
+新
++ 实验功能：插件安装程序
 
-### 2.Custom extension / operator
+### v1.2.7
 
-You are allow to assign a operator to import a certain types of file, with rule.
+2021.12.10
 
-Just need to fill in the `extension` with your file suffix (like obj), and copy and paste the python command to the `Operator Idenfitier`.
++ 实验功能：导出模型/材质资产
++ 修复 gltf 导出器
++ 修复导入菜单中显示的导出配置
++ ui 改进
 
-<img src="res/img/image-20211007110357103.png" alt="image-20211007110357103" style="zoom: 80%;" />
+### v1.2.6
 
-Though the operator identifier will auto correct the itself, you are still need to pay attention to the format.
+2021.12.09
 
-Right: `import_mesh.stl`
++ 添加检查更新运算符_
 
-Error: `bpy.ops.import_mesh.stl(prop = value)`
+### v1.2.5
 
-### 2.Operator Property
+2021.12.06
 
-You are allow to set most of the property of  your custom operator with a prop list. 
-
-![image-20211007110540728](res/img/image-20211007110540728.png)
-
-### 3.Config Filter
-
-If you have hundreds of config, you can search and filter it with both extension / config name.
-
-![image-20211007110306654](res/img/image-20211007110306654.png)
-
-### 4.Import / Export Config
-
-Config can be import or export with json file.
-
-It will look like this. 
-
-```json
-{
-    "config name": {
-        "extension": "stl",
-        "bl_idname": "import_mesh.stl",
-        "prop_list": {
-            "global_scale": 1,
-            "axis_up": "Z"
-        }
-    }
-}
-```
++ 集成配置系统至 Super Export
 
 
+### v1.2
 
-## Settings
+2021.12.04
 
-+ Force Unicode:
++ 一键模型导出 （ctrl shift c），可将选中物体一键导出为（blend/obj/stl/fbx）
+  + 导出后复制至剪切板，可一键黏贴到需要的位置，便于发送于整理资产
+  + blend文件导出后将打包所有外部引用资产
+  + obj/stl/fbx文件支持批量导出功能（按下alt后，每个物体导出为单独文件）
++ 一键图像导出 （ctrl shift c）
+  + 图像编辑器中，可选择将图片导出为像素（不支持透明像素）/图像文件，前者可一键黏贴至ps等图像编辑软件
 
-  force the encoding to be 'utf-8' . If you enable the same option in your windows languages settings, check it，else not.
+### v1.1.1
 
-  <img src="res/img/1.png" alt="1" style="zoom:50%;" />
+2021.12.02 
 
-+ Report time
++ 修复 2.83~2,.92 自定义配置导入错误
 
-  a small to for compare custom operator running time
+### v1.1
 
+2021.12.01 
+
++ 添加对macOS的初步支持
++ 修复兼容2.83所导致的错误
++ 对win平台添加图像编辑器的一键导出功能（不支持透明像素）
+
+### v1.0.1
+
+2021.11.30  
+
++ 正式发布

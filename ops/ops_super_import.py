@@ -1,6 +1,6 @@
-import os
+from __future__ import annotations
+import sys
 import time
-import subprocess
 
 import bpy
 from bpy.props import (EnumProperty,
@@ -9,59 +9,34 @@ from bpy.props import (EnumProperty,
                        IntProperty,
                        BoolProperty)
 
-from ..clipboard.wintypes import WintypesClipboard as Clipboard
+from .op_dynamic_io import IO_Base
+from .core import MeasureTime, ConfigItemHelper, ConfigHelper
+from .core import is_float, get_pref, convert_value
 
-from .utils import MeasureTime, ConfigItemHelper, ConfigHelper, PopupMenu
-from .utils import is_float, get_pref, convert_value
-
-from ..loader.default_importer import default_importer
-from ..loader.default_blend import default_blend_lib
+from ..importer.default_importer import default_importer
 
 from ..ui.icon_utils import RSN_Preview
 
 import_icon = RSN_Preview(image='import.bip', name='import_icon')
 
 
-class SuperImport(bpy.types.Operator):
+class SuperImport(IO_Base, bpy.types.Operator):
     """Paste Model/Images"""
     bl_label = "Super Import"
     bl_options = {"UNDO_GROUPED"}
-
-    # dependant class
-    #################
-    dep_classes = []  # for easier manage, helpful for batch register and un register
-
-    # data
-    #################
-    clipboard = None  # clipboard data
-    file_list = []  # store clipboard urls for importing
-    CONFIGS = None  # config list from user preference
-    ext = ''  # only support one file extension at a time, set as global parm
-
-    # state
-    ###############
-    use_custom_config = False  # if there is more then one config that advance user define
-    config_list_index: IntProperty()  # index for reading pref config list
-
-    # Utils
-    ###########
-    def restore(self):
-        self.file_list.clear()
-        self.clipboard = None
-        self.ext = None
-
-    def report_time(self, start_time):
-        if get_pref().report_time: self.report({"INFO"},
-                                               f'{self.bl_label} Cost {round(time.time() - start_time, 5)} s')
 
     # Build-in
     ############
     def invoke(self, context, event):
         self.restore()
 
+        if sys.platform == "win32":
+            from ..clipboard.windows import WintypesClipboard as Clipboard
+        elif sys.platform == "darwin":
+            from ..clipboard.darwin.mac import MacClipboard as Clipboard
         # get Clipboard
         self.clipboard = Clipboard()
-        self.file_list = self.clipboard.push(force_unicode=get_pref().force_unicode)
+        self.file_list = self.clipboard.pull(force_unicode=get_pref().force_unicode)
 
         del self.clipboard  # release clipboard
 
@@ -77,7 +52,7 @@ class SuperImport(bpy.types.Operator):
                 self.report({"ERROR"}, "Only one type of file can be imported at a time")
                 return {"CANCELLED"}
 
-        self.CONFIGS = ConfigHelper(check_use=True, filter=self.ext)
+        self.CONFIGS = ConfigHelper(check_use=True, filter=self.ext, io_type='IMPORT')
         config_list, index_list = self.CONFIGS.config_list, self.CONFIGS.index_list
 
         # import default if not custom config for this file extension
@@ -103,17 +78,7 @@ class SuperImport(bpy.types.Operator):
 
         return {"FINISHED"}
 
-    # Import Method
-    def import_blend_default(self, context):
-        """Import with default popup"""
-        pass
-
-    def import_default(self, context):
-        """Import with blender's default setting"""
-        pass
-
     # Import Method (Popup)
-    ##############
     def import_custom_dynamic(self, context):
         # unregister_class
         for cls in self.dep_classes:
@@ -141,47 +106,25 @@ class SuperImport(bpy.types.Operator):
 
         # dynamic operator
         ##################
+        from .op_dynamic_io import DynamicImport
+
         for index in self.CONFIGS.index_list:
             if index in match_index_list: continue  # not register those match config
             # only for register
             config_item = get_pref().config_list[index]
             ITEM = ConfigItemHelper(config_item)
 
-            # define exec
-            def execute(self, context):
-                # use pre-define index to call config
-                ITEM = self.ITEM
-
-                op_callable, ops_args, op_context = ITEM.get_operator_and_args()
-
-                if op_callable:
-                    with MeasureTime() as start_time:
-                        for file_path in file_list:
-                            if file_path in match_file_op_dict: continue
-                            ops_args['filepath'] = file_path
-                            try:
-                                if op_context:
-                                    op_callable(op_context, **ops_args)
-                                else:
-                                    op_callable(**ops_args)
-                            except Exception as e:
-                                self.report({"ERROR"}, str(e))
-
-                        if get_pref().report_time: self.report({"INFO"},
-                                                               f'{self.bl_label} Cost {round(time.time() - start_time, 5)} s')
-                else:
-                    self.report({"ERROR"}, f'{op_callable} Error!!!')
-
-                return {"FINISHED"}
-
             op_cls = type("DynOp",
                           (bpy.types.Operator,),
                           {"bl_idname": f'wm.spio_config_{index}',
                            "bl_label": ITEM.name,
                            "bl_description": ITEM.description,
-                           "execute": execute,
+                           "execute": DynamicImport.execute,
                            # custom pass in
-                           'ITEM': ITEM, },
+                           'ITEM': ITEM,
+                           'file_list': file_list,
+                           'match_file_op_dict': match_file_op_dict,
+                           },
                           )
 
             self.dep_classes.append(op_cls)
@@ -221,6 +164,7 @@ class SuperImport(bpy.types.Operator):
 
         if len(remain_list) > 0:
             # set draw menu
+            from .core import PopupImportMenu
             import_op = self
             ext = self.ext
 
@@ -239,13 +183,13 @@ class SuperImport(bpy.types.Operator):
                     layout.operator('spio.import_model').files = '$$'.join(
                         remain_list)
                 elif ext == 'blend':
-                    pop = PopupMenu(file_list=remain_list, context=context)
+                    pop = PopupImportMenu(file_list=remain_list, context=context)
                     menu = pop.default_blend_menu(return_menu=True)
-                    menu(self, context)
+                    if menu: menu(self, context)
                 else:
-                    pop = PopupMenu(file_list=remain_list, context=context)
+                    pop = PopupImportMenu(file_list=remain_list, context=context)
                     menu = pop.default_image_menu(return_menu=True)
-                    menu(self, context)
+                    if menu: menu(self, context)
 
             context.window_manager.popup_menu(draw_custom_menu, title=title, icon='FILEBROWSER')
 
@@ -259,7 +203,8 @@ class WM_OT_super_import(SuperImport):
 
     def import_blend_default(self, context):
         """Import with default popup"""
-        popup = PopupMenu(file_list=self.file_list, context=context)
+        from .core import PopupImportMenu
+        popup = PopupImportMenu(file_list=self.file_list, context=context)
         popup.default_blend_menu()
 
     def import_default(self, context):
@@ -270,7 +215,9 @@ class WM_OT_super_import(SuperImport):
                 op_callable = getattr(getattr(bpy.ops, bl_idname.split('.')[0]), bl_idname.split('.')[1])
                 op_callable(filepath=file_path)
         else:
-            popup = PopupMenu(self.file_list, context)
+            from .core import PopupImportMenu
+
+            popup = PopupImportMenu(self.file_list, context)
             popup.default_image_menu()
 
 
@@ -293,6 +240,7 @@ def register():
 
     # Global ext
     bpy.types.Scene.spio_ext = StringProperty(name='Filter extension', default='')
+    bpy.types.WindowManager.spio_cache_import = StringProperty()
     # Menu append
     bpy.types.NODE_MT_context_menu.prepend(node_context_menu)
 
@@ -303,3 +251,6 @@ def unregister():
     bpy.types.NODE_MT_context_menu.remove(node_context_menu)
 
     bpy.utils.unregister_class(WM_OT_super_import)
+
+    del bpy.types.Scene.spio_ext
+    del bpy.types.WindowManager.spio_cache_import
