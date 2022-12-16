@@ -1,23 +1,16 @@
 from __future__ import annotations
+
+import os.path
 import sys
-import time
 
 import bpy
-from bpy.props import (EnumProperty,
-                       CollectionProperty,
-                       StringProperty,
-                       IntProperty,
-                       BoolProperty)
+from bpy.props import (StringProperty)
 
-from .op_dynamic_io import IO_Base
+from .dynamic_io import IO_Base
 from .core import MeasureTime, ConfigItemHelper, ConfigHelper
-from .core import is_float, get_pref, convert_value
+from .core import get_pref
 
-from ..importer.default_importer import default_importer
-
-from ..ui.icon_utils import RSN_Preview
-
-import_icon = RSN_Preview(image='import.bip', name='import_icon')
+from ..preferences.data_icon import G_ICON_ID
 
 
 class SuperImport(IO_Base, bpy.types.Operator):
@@ -30,30 +23,52 @@ class SuperImport(IO_Base, bpy.types.Operator):
     def invoke(self, context, event):
         self.restore()
 
-        if sys.platform == "win32":
-            from ..clipboard.windows import WintypesClipboard as Clipboard
-        elif sys.platform == "darwin":
-            from ..clipboard.darwin.mac import MacClipboard as Clipboard
+        from ..clipboard.clipboard import Clipboard as Clipboard
         # get Clipboard
         self.clipboard = Clipboard()
-        self.file_list = self.clipboard.pull(force_unicode=get_pref().force_unicode)
+        file_list = self.clipboard.pull_files_from_clipboard(force_unicode=get_pref().force_unicode)
 
         del self.clipboard  # release clipboard
 
-        if len(self.file_list) == 0:
+        if len(file_list) == 0:
             self.report({"ERROR"}, "No file found in clipboard!")
             return {"CANCELLED"}
 
-        for file_path in self.file_list:
-            extension = file_path.split('.')[-1].lower()
-            if self.ext is None:
-                self.ext = extension
-            elif self.ext != extension:
-                self.report({"ERROR"}, "Only one type of file can be imported at a time")
-                return {"CANCELLED"}
+        for file_path in file_list:
+            if os.path.isdir(file_path):
+                self.dir_list.append(file_path)  # add dir list for batch import folder's files
+                continue
+            elif not os.path.exists(file_path):
+                self.report({"ERROR"}, f"{file_path} not exist!")
 
+            # pass extra file
+            extension = file_path.split('.')[-1].lower()
+            if extension in {'mtl'}:
+                continue
+
+            self.file_list.append(file_path)
+        # count ext type
+        ext_list = [file.split('.')[-1].lower() for file in self.file_list]
+        # report if more than one extension is selected
+        if len(set(ext_list)) > 1:
+            self.report({"WARNING"}, "More than one format of file is copied!")
+            # return {"CANCELLED"}
+        ext_count_dict = dict()
+
+        for ext in ext_list:
+            if ext not in ext_count_dict:
+                ext_count_dict[ext] = 1
+            else:
+                ext_count_dict[ext] += 1
+
+        # set the main ext
+        for key, value in ext_count_dict.items():
+            if (value == max(ext_count_dict.values())):
+                self.ext = key
+                break
+
+        # call for match configs
         self.CONFIGS = ConfigHelper(check_use=True, filter=self.ext, io_type='IMPORT')
-        config_list, index_list = self.CONFIGS.config_list, self.CONFIGS.index_list
 
         # import default if not custom config for this file extension
         if self.CONFIGS.is_empty():
@@ -66,9 +81,7 @@ class SuperImport(IO_Base, bpy.types.Operator):
                 return self.execute(context)
 
         self.use_custom_config = True
-        # set default index to prevent default index is not in the filter list ui
 
-        self.config_list_index = index_list[0]
         return self.import_custom_dynamic(context)
 
     def execute(self, context):
@@ -81,12 +94,12 @@ class SuperImport(IO_Base, bpy.types.Operator):
     # Import Method (Popup)
     def import_custom_dynamic(self, context):
         # unregister_class
-        for cls in self.dep_classes:
-            bpy.utils.unregister_class(cls)
+        self.unregister_dep_classes()
         self.dep_classes.clear()
 
         # no match list
         file_list = self.file_list
+        dir_list = self.dir_list
         # match dict
         match_file_op_dict = dict()
         # match index :exclude from popup importer
@@ -96,6 +109,7 @@ class SuperImport(IO_Base, bpy.types.Operator):
             # set config for register
             config_item = get_pref().config_list[index]
             ITEM = ConfigItemHelper(config_item)
+            if not ITEM.is_config_item_poll(context.area.type): continue
 
             match_files = ITEM.get_match_files(file_list)
 
@@ -106,13 +120,17 @@ class SuperImport(IO_Base, bpy.types.Operator):
 
         # dynamic operator
         ##################
-        from .op_dynamic_io import DynamicImport
+        from .dynamic_io import DynamicImport
+        from ..imexporter.default_importer import get_importer
+
+        importer = get_importer(cpp_obj_importer=get_pref().cpp_obj_importer)
 
         for index in self.CONFIGS.index_list:
             if index in match_index_list: continue  # not register those match config
             # only for register
             config_item = get_pref().config_list[index]
             ITEM = ConfigItemHelper(config_item)
+            if not ITEM.is_config_item_poll(context.area.type): continue
 
             op_cls = type("DynOp",
                           (bpy.types.Operator,),
@@ -123,6 +141,7 @@ class SuperImport(IO_Base, bpy.types.Operator):
                            # custom pass in
                            'ITEM': ITEM,
                            'file_list': file_list,
+                           'dir_list': dir_list,
                            'match_file_op_dict': match_file_op_dict,
                            },
                           )
@@ -130,8 +149,7 @@ class SuperImport(IO_Base, bpy.types.Operator):
             self.dep_classes.append(op_cls)
 
         # register
-        for cls in self.dep_classes:
-            bpy.utils.register_class(cls)
+        self.register_dep_classes()
 
         ############################
         # execute
@@ -155,12 +173,20 @@ class SuperImport(IO_Base, bpy.types.Operator):
                 if get_pref().report_time: self.report_time(start_time)
 
         # then popup menu to select the remain not matching file
-        remain_list = [file for file in file_list if file not in match_file_op_dict]
+        remain_list = list()
+        for file in file_list:
+            # file match ext but not in config
+            if file not in match_file_op_dict:
+                remain_list.append(file)
+            # file not match ext
+            if file.split('.')[-1] != self.ext:
+                remain_list.append(file)
+
         # menu title
         if len(match_file_op_dict) > 0:
             title = f'Match {self.ext.upper()} import finish (Import {len(match_file_op_dict)} files)'
         else:
-            title = f'Super Import {self.ext.upper()} ({len(remain_list)} files)'
+            title = f'Super Import {self.ext.upper()}'
 
         if len(remain_list) > 0:
             # set draw menu
@@ -179,15 +205,19 @@ class SuperImport(IO_Base, bpy.types.Operator):
 
                 layout.separator()
                 # default popup
-                if ext in default_importer:
+                if ext in importer:
                     layout.operator('spio.import_model').files = '$$'.join(
                         remain_list)
                 elif ext == 'blend':
-                    pop = PopupImportMenu(file_list=remain_list, context=context)
+                    pop = PopupImportMenu(file_list=remain_list,
+                                          dir_list=dir_list,
+                                          context=context)
                     menu = pop.default_blend_menu(return_menu=True)
                     if menu: menu(self, context)
                 else:
-                    pop = PopupImportMenu(file_list=remain_list, context=context)
+                    pop = PopupImportMenu(file_list=remain_list,
+                                          dir_list=dir_list,
+                                          context=context)
                     menu = pop.default_image_menu(return_menu=True)
                     if menu: menu(self, context)
 
@@ -204,38 +234,42 @@ class WM_OT_super_import(SuperImport):
     def import_blend_default(self, context):
         """Import with default popup"""
         from .core import PopupImportMenu
-        popup = PopupImportMenu(file_list=self.file_list, context=context)
+        popup = PopupImportMenu(file_list=self.file_list,
+                                dir_list=self.dir_list,
+                                context=context)
         popup.default_blend_menu()
 
     def import_default(self, context):
+        from ..imexporter.default_importer import get_importer
+
+        importer = get_importer(cpp_obj_importer=get_pref().cpp_obj_importer)
+
         ext = self.ext
-        if ext in default_importer:
+        if ext in importer:
             for file_path in self.file_list:
-                bl_idname = default_importer.get(ext)
+                bl_idname = importer.get(ext)
                 op_callable = getattr(getattr(bpy.ops, bl_idname.split('.')[0]), bl_idname.split('.')[1])
                 op_callable(filepath=file_path)
         else:
             from .core import PopupImportMenu
 
-            popup = PopupImportMenu(self.file_list, context)
+            popup = PopupImportMenu(self.file_list, self.dir_list, context)
             popup.default_image_menu()
 
 
 def file_context_menu(self, context):
     layout = self.layout
-    layout.operator('wm.super_import', icon_value=import_icon.get_image_icon_id())
+    layout.operator('wm.super_import', icon_value=G_ICON_ID['import'])
     layout.separator()
 
 
 def node_context_menu(self, context):
     layout = self.layout
-    layout.operator('node.spio_import', icon_value=import_icon.get_image_icon_id())
+    layout.operator('node.spio_import', icon_value=G_ICON_ID['import'])
     layout.separator()
 
 
 def register():
-    import_icon.register()
-
     bpy.utils.register_class(WM_OT_super_import)
 
     # Global ext
@@ -246,8 +280,6 @@ def register():
 
 
 def unregister():
-    import_icon.unregister()
-
     bpy.types.NODE_MT_context_menu.remove(node_context_menu)
 
     bpy.utils.unregister_class(WM_OT_super_import)

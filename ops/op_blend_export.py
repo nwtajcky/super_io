@@ -5,17 +5,11 @@ import os
 import shutil
 
 import sys
+from pathlib import Path
+from os.path import join, exists
 
 from bpy.props import StringProperty, BoolProperty, EnumProperty
-from .ops_super_import import import_icon
-from .core import get_pref
-
-if sys.platform == "win32":
-    from ..clipboard.windows import PowerShellClipboard as Clipboard
-elif sys.platform == "darwin":
-    from ..clipboard.darwin.mac import MacClipboard as Clipboard
-
-from ..exporter.default_blend import post_process_blend_file
+from .core import get_pref, PostProcess
 
 
 class ImageCopyDefault:
@@ -42,39 +36,28 @@ class SPIO_OT_export_blend(ImageCopyDefault, bpy.types.Operator):
         ori_dir = bpy.context.preferences.filepaths.temporary_directory
         temp_dir = ori_dir
         if ori_dir == '' or not os.path.exists(ori_dir):
-            # win temp file
-            temp_dir = os.path.join(os.getenv('APPDATA'), os.path.pardir, 'Local', 'Temp')
+            temp_dir = str(Path(bpy.app.tempdir).parent)
 
         return temp_dir
 
     def execute(self, context):
         # copy buffer
         bpy.ops.view3d.copybuffer()
-        # win support only(not sure the temp dir of macOS)
-        temp_dir = self.get_temp_dir()
+        temp_dir = self.get_temp_dir()  # win support only(not sure the temp dir of macOS)
         if self.filepath == '': self.filepath = os.path.join(temp_dir, context.active_object.name + '.blend')
 
-        if os.path.exists(self.filepath):
+        if exists(self.filepath):
             os.remove(self.filepath)  # remove exist file
 
-        post_process_blend_file(os.path.join(temp_dir, 'copybuffer.blend'), scripts_file_name=self.scripts_file_name)
-
-        shutil.copy(os.path.join(temp_dir, 'copybuffer.blend'), self.filepath)
-        # append obj to scene, mark slower
-
-        # push
-        if get_pref().post_push_to_clipboard:
-            clipboard = Clipboard()
-            clipboard.push_to_clipboard(paths=[self.filepath])
-
-            self.report({'INFO'}, f'{context.active_object.name}.blend has been copied to Clipboard')
-
-        if get_pref().post_open_dir:
-            import subprocess
-            if sys.platform == 'darwin':
-                subprocess.check_call(['open', '--', temp_dir])
-            elif sys.platform == 'win32':
-                os.startfile(temp_dir)
+        POST = PostProcess()
+        POST.fix_blend(join(temp_dir, 'copybuffer.blend'),
+                       scripts_file_name=self.scripts_file_name)
+        # Copy
+        shutil.copy(join(temp_dir, 'copybuffer.blend'),
+                    self.filepath)
+        # Prefs
+        POST.copy_to_clipboard(paths=[self.filepath], op=self)
+        POST.open_dir(self.filepath)
 
         return {'FINISHED'}
 

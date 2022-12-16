@@ -1,8 +1,8 @@
 import bpy
-import os
 
-from bpy.props import StringProperty, BoolProperty, EnumProperty
-from ..importer.default_importer import default_importer
+from bpy.props import StringProperty
+from ..imexporter.default_importer import get_importer
+from ..preferences.prefs import get_pref
 
 
 class SPIO_OT_import_model(bpy.types.Operator):
@@ -29,10 +29,12 @@ class SPIO_OT_import_model(bpy.types.Operator):
             )
 
     def execute(self, context):
+        importer = get_importer(cpp_obj_importer=get_pref().cpp_obj_importer)
+
         for filepath in self.files.split('$$'):
             ext = filepath.split('.')[-1]
-            if ext in default_importer:
-                bl_idname = default_importer.get(ext)
+            if ext in importer:
+                bl_idname = importer.get(ext)
                 op_callable = getattr(getattr(bpy.ops, bl_idname.split('.')[0]), bl_idname.split('.')[1])
                 op_callable(filepath=filepath)
 

@@ -4,15 +4,7 @@ import sys
 
 from bpy.props import StringProperty, BoolProperty, EnumProperty
 
-from .core import get_pref
-from .ops_super_import import import_icon
-
-if sys.platform == "win32":
-    from ..clipboard.windows import PowerShellClipboard as Clipboard
-elif sys.platform == "darwin":
-    from ..clipboard.darwin.mac import MacClipboard as Clipboard
-
-from ..exporter.default_exporter import default_exporter, exporter_ops_props
+from .core import get_pref, PostProcess
 
 
 class ModeCopyDefault:
@@ -40,7 +32,9 @@ class SPIO_OT_export_model(ModeCopyDefault, bpy.types.Operator):
         temp_dir = ori_dir
         if ori_dir == '':
             # win temp file
-            temp_dir = os.path.join(os.getenv('APPDATA'), os.path.pardir, 'Local', 'Temp')
+            temp_dir = os.path.join(os.path.expanduser('~'), 'spio_temp')
+            if not "spio_temp" in os.listdir(os.path.expanduser('~')):
+                os.makedirs(temp_dir)
 
         return temp_dir
 
@@ -80,6 +74,13 @@ class SPIO_OT_export_model(ModeCopyDefault, bpy.types.Operator):
         return self.execute(context)
 
     def execute(self, context):
+
+        from ..imexporter.default_exporter import get_exporter, get_exporter_ops_props
+        # get exporter by preferences
+        default_exporter = get_exporter(cpp_obj_exporter=get_pref().cpp_obj_exporter,
+                                        extend=get_pref().extend_export_menu)
+        exporter_ops_props = get_exporter_ops_props(cpp_obj_exporter=get_pref().cpp_obj_exporter)
+
         if self.extension not in default_exporter: return {"CANCELLED"}
 
         temp_dir = self.get_temp_dir()
@@ -102,24 +103,10 @@ class SPIO_OT_export_model(ModeCopyDefault, bpy.types.Operator):
             paths = self.export_single(context, op_callable, op_args, temp_dir)
             self.report({'INFO'}, f'{context.active_object.name}.{self.extension} has been copied to Clipboard')
 
-        # push
-        if get_pref().post_push_to_clipboard:
-            new_files = [file for file in os.listdir(temp_dir)]
-
-            extra_files = [os.path.join(temp_dir, file) for file in new_files if
-                           file not in src_file or src_file.get(file) != os.path.getmtime(
-                               os.path.join(temp_dir, file))]
-
-
-            clipboard = Clipboard()
-            clipboard.push_to_clipboard(paths=extra_files)
-
-        if get_pref().post_open_dir:
-            import subprocess
-            if sys.platform == 'darwin':
-                subprocess.check_call(['open', '--', temp_dir])
-            elif sys.platform == 'win32':
-                os.startfile(temp_dir)
+        # Pref
+        POST = PostProcess()
+        POST.copy_to_clipboard(paths=PostProcess.get_update_files(src_file, temp_dir), op=self)
+        POST.open_dir(temp_dir)
 
         return {'FINISHED'}
 
